@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Idle TCG Poker Game</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts: Pixel Art Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- React and Babel CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Press Start 2P', monospace;
+            background-color: #0b0d19;
+            color: #ffffff;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+
+        .pixel-font-sub {
+            font-family: 'Silkscreen', monospace;
+        }
+
+        /* Pixel borders & retro shadows */
+        .pixel-box {
+            border: 4px solid #1a1e36;
+            box-shadow: 
+                -4px 0 #000,
+                4px 0 #000,
+                0 -4px #000,
+                0 4px #000,
+                0 6px 0 0 rgba(0,0,0,0.4);
+        }
+
+        .pixel-box-gold {
+            border: 4px solid #f59e0b;
+            box-shadow: 
+                -4px 0 #78350f,
+                4px 0 #78350f,
+                0 -4px #78350f,
+                0 4px #78350f,
+                0 6px 0 0 rgba(0,0,0,0.5);
+        }
+
+        .pixel-btn {
+            position: relative;
+            transition: all 0.05s ease;
+            box-shadow: 0 4px 0 #000;
+        }
+
+        .pixel-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 0 #000;
+        }
+
+        /* Custom scrollbars */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border: 2px solid #0f172a;
+        }
+
+        /* App container dimensions */
+        .app-fixed-container {
+            width: 100%;
+            max-width: 480px;
+            height: 100vh;
+            max-height: 880px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            background-color: #0f1225;
+            position: relative;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body class="flex justify-center items-center min-h-screen bg-slate-950">
+
+    <div id="root" class="w-full h-full flex justify-center items-center"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // Sound Synthesis Utility (Web Audio API)
+        const playSound = (type) => {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+
+                const now = ctx.currentTime;
+
+                if (type === 'click') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(400, now);
+                    osc.frequency.exponentialRampToValueAtTime(800, now + 0.05);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.linearRampToValueAtTime(0.01, now + 0.05);
+                    osc.start(now);
+                    osc.stop(now + 0.05);
+                } else if (type === 'win') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(523.25, now);
+                    osc.frequency.setValueAtTime(659.25, now + 0.1);
+                    osc.frequency.setValueAtTime(783.99, now + 0.2);
+                    osc.frequency.setValueAtTime(1046.50, now + 0.3);
+                    gain.gain.setValueAtTime(0.15, now);
+                    gain.gain.linearRampToValueAtTime(0.01, now + 0.5);
+                    osc.start(now);
+                    osc.stop(now + 0.5);
+                } else if (type === 'fuse') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(200, now);
+                    osc.frequency.linearRampToValueAtTime(1200, now + 0.3);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.linearRampToValueAtTime(0.01, now + 0.35);
+                    osc.start(now);
+                    osc.stop(now + 0.35);
+                } else if (type === 'lose') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(300, now);
+                    osc.frequency.setValueAtTime(150, now + 0.15);
+                    gain.gain.setValueAtTime(0.15, now);
+                    gain.gain.linearRampToValueAtTime(0.01, now + 0.3);
+                    osc.start(now);
+                    osc.stop(now + 0.3);
+                }
+            } catch(e) {}
+        };
+
+        // Rarity Definitions
+        const RARITIES = [
+            { id: 'common', name: 'COMMON', color: 'text-slate-300', bg: 'bg-slate-800', border: 'border-slate-500', mult: 1, fuseCost: 2000, next: 'uncommon' },
+            { id: 'uncommon', name: 'UNCOMMON', color: 'text-emerald-400', bg: 'bg-emerald-950', border: 'border-emerald-500', mult: 2, fuseCost: 4000, next: 'rare' },
+            { id: 'rare', name: 'RARE', color: 'text-blue-400', bg: 'bg-blue-950', border: 'border-blue-500', mult: 4, fuseCost: 8000, next: 'epic' },
+            { id: 'epic', name: 'EPIC', color: 'text-purple-400', bg: 'bg-purple-950', border: 'border-purple-500', mult: 8, fuseCost: 16000, next: 'legendary' },
+            { id: 'legendary', name: 'LEGENDARY', color: 'text-amber-400', bg: 'bg-amber-950', border: 'border-amber-500', mult: 16, fuseCost: 32000, next: 'mythic' },
+            { id: 'mythic', name: 'MYTHIC', color: 'text-rose-400', bg: 'bg-rose-950', border: 'border-rose-500', mult: 32, fuseCost: 0, next: null }
+        ];
+
+        // Suits Definition
+        const SUITS = [
+            { id: 'hearts', symbol: '♥', color: 'text-red-500', name: 'Hearts', isRed: true },
+            { id: 'diamonds', symbol: '♦', color: 'text-red-500', name: 'Diamonds', isRed: true },
+            { id: 'clubs', symbol: '♣', color: 'text-slate-200', name: 'Clubs', isRed: false },
+            { id: 'spades', symbol: '♠', color: 'text-slate-200', name: 'Spades', isRed: false }
+        ];
+
+        // Ranks Data
+        const RANKS_DATA = [
+            { name: '2', coinValue: 2, pokerRank: 2 },
+            { name: '3', coinValue: 3, pokerRank: 3 },
+            { name: '4', coinValue: 4, pokerRank: 4 },
+            { name: '5', coinValue: 5, pokerRank: 5 },
+            { name: '6', coinValue: 6, pokerRank: 6 },
+            { name: '7', coinValue: 7, pokerRank: 7 },
+            { name: '8', coinValue: 8, pokerRank: 8 },
+            { name: '9', coinValue: 9, pokerRank: 9 },
+            { name: '10', coinValue: 10, pokerRank: 10 },
+            { name: 'J', coinValue: 12, pokerRank: 11 },
+            { name: 'Q', coinValue: 15, pokerRank: 12 },
+            { name: 'K', coinValue: 20, pokerRank: 13 },
+            { name: 'A', coinValue: 25, pokerRank: 14 }
+        ];
+
+        // Helper to create a card object
+        function getRandomCard(forcedRarity = null) {
+            const suitObj = SUITS[Math.floor(Math.random() * SUITS.length)];
+            const rankObj = RANKS_DATA[Math.floor(Math.random() * RANKS_DATA.length)];
+            
+            let rarity = forcedRarity;
+            if (!rarity) {
+                const rand = Math.random();
+                if (rand < 0.55) rarity = 'common';
+                else if (rand < 0.80) rarity = 'uncommon';
+                else if (rand < 0.93) rarity = 'rare';
+                else if (rand < 0.98) rarity = 'epic';
+                else if (rand < 0.998) rarity = 'legendary';
+                else rarity = 'mythic';
+            }
+
+            return {
+                id: Math.random().toString(36).substring(2, 9) + Date.now(),
+                suit: suitObj.id,
+                symbol: suitObj.symbol,
+                rankName: rankObj.name,
+                coinValue: rankObj.coinValue,
+                pokerRank: rankObj.pokerRank,
+                rarity: rarity
+            };
+        }
+
+        // Helper function to generate 5 strictly unique cards (no duplicate Rank + Suit)
+        function generateUniqueHand() {
+            const hand = [];
+            const usedKeys = new Set();
+            while (hand.length < 5) {
+                const card = getRandomCard();
+                const key = `${card.rankName}-${card.suit}`;
+                if (!usedKeys.has(key)) {
+                    usedKeys.add(key);
+                    hand.push(card);
+                }
+            }
+            return hand;
+        }
+
+        // Evaluate Poker Hand Hierarchy
+        function getPokerHandDetails(cards) {
+            if (!cards || cards.length !== 5) {
+                return { handName: 'INCOMPLETE HAND', categoryRank: 0, mult: 1 };
+            }
+
+            const ranks = cards.map(c => c.pokerRank).sort((a, b) => b - a);
+            const suits = cards.map(c => c.suit);
+
+            const rankCounts = {};
+            ranks.forEach(r => rankCounts[r] = (rankCounts[r] || 0) + 1);
+
+            const counts = Object.values(rankCounts).sort((a, b) => b - a);
+            const isFlush = suits.every(s => s === suits[0]);
+            
+            let isStraight = false;
+            let straightHigh = 0;
+            const uniqueRanks = [...new Set(ranks)].sort((a, b) => b - a);
+            
+            if (uniqueRanks.length === 5) {
+                if (uniqueRanks[0] - uniqueRanks[4] === 4) {
+                    isStraight = true;
+                    straightHigh = uniqueRanks[0];
+                } else if (uniqueRanks[0] === 14 && uniqueRanks[1] === 5 && uniqueRanks[2] === 4 && uniqueRanks[3] === 3 && uniqueRanks[4] === 2) {
+                    isStraight = true;
+                    straightHigh = 5;
+                }
+            }
+
+            if (isFlush && isStraight) {
+                if (straightHigh === 14) return { handName: 'ROYAL FLUSH', categoryRank: 10, mult: 50 };
+                return { handName: 'STRAIGHT FLUSH', categoryRank: 9, mult: 25 };
+            }
+            if (counts[0] === 4) return { handName: 'FOUR OF A KIND', categoryRank: 8, mult: 15 };
+            if (counts[0] === 3 && counts[1] === 2) return { handName: 'FULL HOUSE', categoryRank: 7, mult: 10 };
+            if (isFlush) return { handName: 'FLUSH', categoryRank: 6, mult: 7 };
+            if (isStraight) return { handName: 'STRAIGHT', categoryRank: 5, mult: 5 };
+            if (counts[0] === 3) return { handName: 'THREE OF A KIND', categoryRank: 4, mult: 3 };
+            if (counts[0] === 2 && counts[1] === 2) return { handName: 'TWO PAIR', categoryRank: 3, mult: 2 };
+            if (counts[0] === 2) return { handName: 'ONE PAIR', categoryRank: 2, mult: 1.5 };
+
+            return { handName: 'HIGH CARD', categoryRank: 1, mult: 1 };
+        }
+
+        function comparePokerHands(handA, handB) {
+            return handA.categoryRank - handB.categoryRank;
+        }
+
+        // Auto-fit function: Prioritizes poker hand hierarchy over raw coin values
+        function findBestHandCombination(allCards) {
+            const uniqueMap = {};
+            allCards.forEach(c => {
+                const key = `${c.rankName}-${c.suit}`;
+                const rarityMult = RARITIES.find(r => r.id === c.rarity)?.mult || 1;
+                const score = c.pokerRank * 10 + rarityMult;
+                if (!uniqueMap[key] || score > uniqueMap[key].score) {
+                    uniqueMap[key] = { card: c, score };
+                }
+            });
+
+            let pool = Object.values(uniqueMap).map(i => i.card);
+            if (pool.length <= 5) return pool;
+
+            function getCombinations(arr, k) {
+                if (k === 0) return [[]];
+                if (arr.length === 0) return [];
+                const head = arr[0];
+                const tail = arr.slice(1);
+                const withHead = getCombinations(tail, k - 1).map(c => [head, ...c]);
+                const withoutHead = getCombinations(tail, k);
+                return [...withHead, ...withoutHead];
+            }
+
+            if (pool.length > 16) {
+                pool.sort((a, b) => b.pokerRank - a.pokerRank);
+                pool = pool.slice(0, 16);
+            }
+
+            const combos = getCombinations(pool, 5);
+            let bestCombo = combos[0];
+            let bestEval = getPokerHandDetails(bestCombo);
+            let bestBaseSum = bestCombo.reduce((sum, c) => sum + c.coinValue, 0);
+
+            for (let i = 1; i < combos.length; i++) {
+                const combo = combos[i];
+                const evalDetails = getPokerHandDetails(combo);
+                const comp = comparePokerHands(evalDetails, bestEval);
+
+                if (comp > 0) {
+                    bestCombo = combo;
+                    bestEval = evalDetails;
+                    bestBaseSum = combo.reduce((sum, c) => sum + c.coinValue, 0);
+                } else if (comp === 0) {
+                    const baseSum = combo.reduce((sum, c) => sum + c.coinValue, 0);
+                    if (baseSum > bestBaseSum) {
+                        bestCombo = combo;
+                        bestEval = evalDetails;
+                        bestBaseSum = baseSum;
+                    }
+                }
+            }
+
+            return bestCombo;
+        }
+
+        function App() {
+            const [tab, setTab] = useState('game');
+            const [coins, setCoins] = useState(1500);
+            const [xp, setXp] = useState(0);
+            const [level, setLevel] = useState(1);
+            const [wins, setWins] = useState(0);
+            const [toast, setToast] = useState(null);
+
+            const [activeCards, setActiveCards] = useState(() => generateUniqueHand());
+
+            const [inventory, setInventory] = useState([
+                getRandomCard('common'),
+                getRandomCard('common'),
+                getRandomCard('common'),
+                getRandomCard('uncommon'),
+                getRandomCard('uncommon')
+            ]);
+
+            const [houseHandCards, setHouseHandCards] = useState([]);
+            const [playingHand, setPlayingHand] = useState(false);
+            const [lastResult, setLastResult] = useState(null);
+
+            const [checkInStreak, setCheckInStreak] = useState(1);
+            const [checkedInToday, setCheckedInToday] = useState(false);
+            const [tasks, setTasks] = useState([
+                { id: 1, title: 'Play 3 Poker Hands', target: 3, progress: 0, reward: 500, claimed: false },
+                { id: 2, title: 'Fuse 1 Card Set', target: 1, progress: 0, reward: 800, claimed: false },
+                { id: 3, title: 'Win 2 Matches', target: 2, progress: 0, reward: 1200, claimed: false }
+            ]);
+
+            const [suitFilter, setSuitFilter] = useState('all');
+            const [rarityFilter, setRarityFilter] = useState('all');
+
+            const showToast = (text, type = 'info') => {
+                setToast({ text, type });
+                setTimeout(() => setToast(null), 3000);
+            };
+
+            const passivePerHour = useMemo(() => {
+                return activeCards.reduce((acc, card) => {
+                    const rarityData = RARITIES.find(r => r.id === card.rarity) || RARITIES[0];
+                    return acc + (card.coinValue * rarityData.mult);
+                }, 0);
+            }, [activeCards]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    if (passivePerHour > 0) {
+                        const tickReward = Math.max(1, Math.floor(passivePerHour / 720));
+                        setCoins(prev => prev + tickReward);
+                    }
+                }, 5000);
+                return () => clearInterval(interval);
+            }, [passivePerHour]);
+
+            const playerEval = useMemo(() => {
+                return getPokerHandDetails(activeCards);
+            }, [activeCards]);
+
+            const equipCardFromInventory = (cardToEquip) => {
+                if (activeCards.length >= 5) {
+                    showToast('TABLE IS FULL (MAX 5)', 'warning');
+                    return;
+                }
+
+                const isDuplicateOnTable = activeCards.some(
+                    c => c.rankName === cardToEquip.rankName && c.suit === cardToEquip.suit
+                );
+
+                if (isDuplicateOnTable) {
+                    playSound('lose');
+                    showToast(`ALREADY HAVE ${cardToEquip.rankName} OF ${cardToEquip.symbol} ON TABLE!`, 'error');
+                    return;
+                }
+
+                setInventory(prev => {
+                    const idx = prev.findIndex(c => c.id === cardToEquip.id);
+                    if (idx === -1) return prev;
+                    const next = [...prev];
+                    next.splice(idx, 1);
+                    return next;
+                });
+
+                setActiveCards(prev => [...prev, cardToEquip]);
+                playSound('click');
+            };
+
+            const unequipCardFromTable = (cardId) => {
+                const card = activeCards.find(c => c.id === cardId);
+                if (!card) return;
+
+                setActiveCards(prev => prev.filter(c => c.id !== cardId));
+                setInventory(prev => [...prev, card]);
+                playSound('click');
+            };
+
+            const handleAutoFit = () => {
+                const allAvailable = [...activeCards, ...inventory];
+                if (allAvailable.length < 5) {
+                    showToast('NEED AT LEAST 5 CARDS IN TOTAL', 'warning');
+                    return;
+                }
+
+                const bestFive = findBestHandCombination(allAvailable);
+                let pool = [...allAvailable];
+                const newTable = [];
+
+                bestFive.forEach(bestCard => {
+                    const idx = pool.findIndex(c => c.id === bestCard.id);
+                    if (idx !== -1) {
+                        newTable.push(pool[idx]);
+                        pool.splice(idx, 1);
+                    }
+                });
+
+                setActiveCards(newTable);
+                setInventory(pool);
+                playSound('win');
+                showToast('AUTO-FIT APPLIED FOR BEST POKER HAND!', 'success');
+            };
+
+            const handleFuseCards = (groupKey) => {
+                const matchingCards = inventory.filter(c => `${c.rankName}-${c.suit}-${c.rarity}` === groupKey);
+                if (matchingCards.length < 3) {
+                    showToast('NEED 3 IDENTICAL CARDS TO FUSE', 'warning');
+                    return;
+                }
+
+                const sampleCard = matchingCards[0];
+                const rarityInfo = RARITIES.find(r => r.id === sampleCard.rarity);
+
+                if (!rarityInfo || !rarityInfo.next) {
+                    showToast('MYTHIC CARDS CANNOT BE FUSED', 'error');
+                    return;
+                }
+
+                if (coins < rarityInfo.fuseCost) {
+                    showToast(`NOT ENOUGH COINS (${rarityInfo.fuseCost} NEEDED)`, 'error');
+                    return;
+                }
+
+                setCoins(prev => prev - rarityInfo.fuseCost);
+                
+                setInventory(prev => {
+                    let countToRemove = 3;
+                    return prev.filter(c => {
+                        if (countToRemove > 0 && `${c.rankName}-${c.suit}-${c.rarity}` === groupKey) {
+                            countToRemove--;
+                            return false;
+                        }
+                        return true;
+                    });
+                });
+
+                const upgradedCard = {
+                    ...sampleCard,
+                    id: Math.random().toString(36).substring(2, 9) + Date.now(),
+                    rarity: rarityInfo.next
+                };
+
+                setInventory(prev => [...prev, upgradedCard]);
+                playSound('fuse');
+                showToast(`FUSED INTO ${rarityInfo.next.toUpperCase()}!`, 'success');
+
+                updateTaskProgress(2, 1);
+            };
+
+            const updateTaskProgress = (taskId, amount) => {
+                setTasks(prev => prev.map(t => {
+                    if (t.id === taskId && !t.claimed) {
+                        const newProg = Math.min(t.target, t.progress + amount);
+                        return { ...t, progress: newProg };
+                    }
+                    return t;
+                }));
+            };
+
+            const handlePlayHand = () => {
+                if (playingHand || activeCards.length < 5) {
+                    showToast('NEED 5 CARDS ON TABLE TO PLAY!', 'warning');
+                    return;
+                }
+
+                setPlayingHand(true);
+                playSound('click');
+
+                const houseCards = generateUniqueHand();
+                setHouseHandCards(houseCards);
+
+                const houseEval = getPokerHandDetails(houseCards);
+                const comp = comparePokerHands(playerEval, houseEval);
+
+                setTimeout(() => {
+                    let earned = 0;
+                    const baseSum = activeCards.reduce((acc, c) => {
+                        const rMult = RARITIES.find(r => r.id === c.rarity)?.mult || 1;
+                        return acc + (c.coinValue * rMult);
+                    }, 0);
+
+                    if (comp > 0) {
+                        earned = Math.floor(baseSum * playerEval.mult * 2);
+                        setCoins(prev => prev + earned);
+                        setWins(prev => prev + 1);
+                        setXp(prev => prev + 50);
+                        setLastResult({ win: true, amount: earned, houseEvalName: houseEval.handName });
+                        playSound('win');
+                        showToast(`VICTORY! EARNED +${earned} COINS`, 'success');
+                        updateTaskProgress(3, 1);
+                    } else {
+                        earned = Math.floor(baseSum * 0.5);
+                        setCoins(prev => prev + earned);
+                        setLastResult({ win: false, amount: earned, houseEvalName: houseEval.handName });
+                        playSound('lose');
+                        showToast(`HOUSE WON WITH ${houseEval.handName}. EARNED +${earned} COINS`, 'error');
+                    }
+
+                    updateTaskProgress(1, 1);
+                    setPlayingHand(false);
+                }, 1200);
+            };
+
+            const handleBuyPack = (cost, guaranteedRarity = null) => {
+                if (coins < cost) {
+                    showToast('NOT ENOUGH COINS', 'error');
+                    return;
+                }
+                setCoins(prev => prev - cost);
+                const newCards = [
+                    getRandomCard(guaranteedRarity),
+                    getRandomCard(),
+                    getRandomCard()
+                ];
+                setInventory(prev => [...prev, ...newCards]);
+                playSound('win');
+                showToast(`OPENED PACK! +${newCards.length} CARDS`, 'success');
+            };
+
+            const claimTaskReward = (task) => {
+                if (task.progress >= task.target && !task.claimed) {
+                    setCoins(prev => prev + task.reward);
+                    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, claimed: true } : t));
+                    playSound('win');
+                    showToast(`CLAIMED +${task.reward} COINS!`, 'success');
+                }
+            };
+
+            const handleDailyCheckIn = () => {
+                if (checkedInToday) return;
+                const reward = 500 + (checkInStreak * 50);
+                setCoins(prev => prev + reward);
+                setCheckedInToday(true);
+                setCheckInStreak(prev => prev + 1);
+                playSound('win');
+                showToast(`DAILY BONUS CLAIMED: +${reward} COINS!`, 'success');
+            };
+
+            const stackedInventory = useMemo(() => {
+                const groups = {};
+                inventory.forEach(card => {
+                    const groupKey = `${card.rankName}-${card.suit}-${card.rarity}`;
+                    if (!groups[groupKey]) {
+                        groups[groupKey] = {
+                            groupKey,
+                            card,
+                            count: 0,
+                            items: []
+                        };
+                    }
+                    groups[groupKey].count++;
+                    groups[groupKey].items.push(card);
+                });
+
+                let result = Object.values(groups);
+
+                if (suitFilter !== 'all') {
+                    result = result.filter(g => g.card.suit === suitFilter);
+                }
+
+                if (rarityFilter !== 'all') {
+                    result = result.filter(g => g.card.rarity === rarityFilter);
+                }
+
+                result.sort((a, b) => {
+                    if (a.card.pokerRank !== b.card.pokerRank) {
+                        return a.card.pokerRank - b.card.pokerRank;
+                    }
+                    return a.card.suit.localeCompare(b.card.suit);
+                });
+
+                return result;
+            }, [inventory, suitFilter, rarityFilter]);
+
+            return (
+                <div class="app-fixed-container pixel-box">
+                    
+                    <div class="bg-slate-900 p-3 border-b-4 border-slate-800 flex justify-between items-center text-xs">
+                        <div class="flex items-center space-x-2">
+                            <span class="text-amber-400 font-bold"><i class="fa-solid fa-coins text-amber-400"></i> {coins.toLocaleString()}</span>
+                            <span class="text-slate-500">|</span>
+                            <span class="text-emerald-400 text-[10px]"><i class="fa-solid fa-bolt text-emerald-400"></i> +{passivePerHour}/h</span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-purple-400 text-[10px]">LVL {level}</span>
+                        </div>
+                    </div>
+
+                    {toast && (
+                        <div class={`absolute top-12 left-4 right-4 z-50 p-3 text-[10px] text-center pixel-box ${
+                            toast.type === 'error' ? 'bg-red-950 border-red-500 text-red-200' :
+                            toast.type === 'warning' ? 'bg-amber-950 border-amber-500 text-amber-200' :
+                            'bg-emerald-950 border-emerald-500 text-emerald-200'
+                        }`}>
+                            {toast.text}
+                        </div>
+                    )}
+
+                    <div class="flex-1 overflow-y-auto p-3 space-y-4">
+                        
+                        {tab === 'game' && (
+                            <div class="space-y-4">
+                                <div class="flex justify-between items-center">
+                                    <div class="text-[10px] text-slate-400">ACTIVE TABLE ({activeCards.length}/5)</div>
+                                    <button 
+                                        onClick={handleAutoFit}
+                                        class="pixel-btn bg-amber-500 border-2 border-amber-300 text-slate-950 font-bold px-2 py-1 text-[9px]">
+                                        <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> AUTO-FIT
+                                    </button>
+                                </div>
+
+                                <div class="grid grid-cols-5 gap-1 bg-slate-950/80 p-2 border-2 border-slate-800 min-h-[110px] items-center">
+                                    {[0, 1, 2, 3, 4].map(idx => {
+                                        const card = activeCards[idx];
+                                        if (!card) {
+                                            return (
+                                                <div key={idx} class="h-24 border-2 border-dashed border-slate-800 rounded flex items-center justify-center text-slate-700 text-xs">
+                                                    +
+                                                </div>
+                                            );
+                                        }
+
+                                        const suitObj = SUITS.find(s => s.id === card.suit);
+                                        const rarityObj = RARITIES.find(r => r.id === card.rarity);
+
+                                        return (
+                                            <div 
+                                                key={card.id}
+                                                onClick={() => unequipCardFromTable(card.id)}
+                                                class={`h-24 ${rarityObj.bg} border-2 ${rarityObj.border} rounded p-1 flex flex-col justify-between cursor-pointer relative hover:brightness-125 transition-all`}>
+                                                <div class={`text-[10px] font-bold ${suitObj.color} flex justify-between`}>
+                                                    <span>{card.rankName}</span>
+                                                    <span>{suitObj.symbol}</span>
+                                                </div>
+                                                <div class={`text-center text-lg ${suitObj.color}`}>
+                                                    {suitObj.symbol}
+                                                </div>
+                                                <div class="text-[7px] text-center text-slate-400 truncate">
+                                                    {card.coinValue} pts
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                <div class="bg-slate-900 border-2 border-slate-800 p-2 text-center">
+                                    <div class="text-[9px] text-slate-400 mb-1">CURRENT HAND COMBINATION</div>
+                                    <div class="text-xs text-amber-400 font-bold">{playerEval.handName} (x{playerEval.mult} MULT)</div>
+                                </div>
+
+                                <button 
+                                    onClick={handlePlayHand}
+                                    disabled={playingHand || activeCards.length < 5}
+                                    class={`w-full py-3 text-xs font-bold pixel-btn ${
+                                        activeCards.length < 5 ? 'bg-slate-800 text-slate-600 border-slate-700' :
+                                        'bg-emerald-600 text-emerald-100 border-emerald-400 hover:bg-emerald-500'
+                                    }`}>
+                                    {playingHand ? 'EVALUATING HAND...' : 'PLAY VS HOUSE'}
+                                </button>
+
+                                {houseHandCards.length > 0 && (
+                                    <div class="bg-slate-900 border-2 border-slate-800 p-2 space-y-2">
+                                        <div class="text-[9px] text-slate-400 text-center">HOUSE HAND</div>
+                                        <div class="grid grid-cols-5 gap-1">
+                                            {houseHandCards.map((card, i) => {
+                                                const suitObj = SUITS.find(s => s.id === card.suit);
+                                                return (
+                                                    <div key={i} class="h-16 bg-slate-950 border border-slate-700 rounded p-1 flex flex-col justify-between text-center">
+                                                        <div class={`text-[9px] ${suitObj.color}`}>{card.rankName}</div>
+                                                        <div class={`text-xs ${suitObj.color}`}>{suitObj.symbol}</div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {tab === 'bag' && (
+                            <div class="space-y-3">
+                                <div class="space-y-2 bg-slate-900 p-2 border-2 border-slate-800">
+                                    <div class="text-[9px] text-slate-400">FILTER BY SUIT</div>
+                                    <div class="flex space-x-1">
+                                        {['all', 'hearts', 'diamonds', 'clubs', 'spades'].map(suit => (
+                                            <button 
+                                                key={suit}
+                                                onClick={() => setSuitFilter(suit)}
+                                                class={`px-2 py-1 text-[8px] pixel-btn border ${
+                                                    suitFilter === suit ? 'bg-amber-500 text-slate-950 border-amber-300' : 'bg-slate-800 text-slate-400 border-slate-700'
+                                                }`}>
+                                                {suit === 'all' ? 'ALL' : SUITS.find(s => s.id === suit)?.symbol}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <div class="text-[9px] text-slate-400 mt-2">FILTER BY RARITY</div>
+                                    <div class="grid grid-cols-3 gap-1">
+                                        {['all', ...RARITIES.map(r => r.id)].map(rarity => (
+                                            <button 
+                                                key={rarity}
+                                                onClick={() => setRarityFilter(rarity)}
+                                                class={`px-1 py-1 text-[7px] pixel-btn border ${
+                                                    rarityFilter === rarity ? 'bg-amber-500 text-slate-950 border-amber-300' : 'bg-slate-800 text-slate-400 border-slate-700'
+                                                }`}>
+                                                {rarity.toUpperCase()}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-3 gap-2">
+                                    {stackedInventory.map(group => {
+                                        const card = group.card;
+                                        const suitObj = SUITS.find(s => s.id === card.suit);
+                                        const rarityObj = RARITIES.find(r => r.id === card.rarity);
+
+                                        return (
+                                            <div 
+                                                key={group.groupKey}
+                                                class={`h-36 ${rarityObj.bg} border-2 ${rarityObj.border} rounded p-2 flex flex-col justify-between relative`}>
+                                                
+                                                <div class="absolute top-1 right-1 bg-amber-500 text-slate-950 text-[8px] font-bold px-1 rounded-full border border-amber-300">
+                                                    x{group.count}
+                                                </div>
+
+                                                <div class={`text-xs font-bold ${suitObj.color} flex justify-between pr-4`}>
+                                                    <span>{card.rankName}</span>
+                                                    <span>{suitObj.symbol}</span>
+                                                </div>
+
+                                                <div class={`text-center text-2xl ${suitObj.color}`}>
+                                                    {suitObj.symbol}
+                                                </div>
+
+                                                <div class="text-[8px] text-center text-slate-400">
+                                                    {rarityObj.name}
+                                                </div>
+
+                                                <div class="space-y-1">
+                                                    <button 
+                                                        onClick={() => equipCardFromInventory(card)}
+                                                        class="w-full py-1 bg-emerald-600 text-white text-[7px] font-bold border border-emerald-400 pixel-btn">
+                                                        EQUIP
+                                                    </button>
+                                                    {group.count >= 3 && rarityObj.next && (
+                                                        <button 
+                                                            onClick={() => handleFuseCards(group.groupKey)}
+                                                            class="w-full py-1 bg-purple-600 text-white text-[7px] font-bold border border-purple-400 pixel-btn">
+                                                            FUSE (3)
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {tab === 'store' && (
+                            <div class="space-y-3">
+                                <div class="text-[10px] text-slate-400 mb-2">BOOSTER PACKS</div>
+                                
+                                <div class="bg-slate-900 border-2 border-slate-800 p-3 flex justify-between items-center">
+                                    <div>
+                                        <div class="text-xs text-amber-400 font-bold">STANDARD PACK</div>
+                                        <div class="text-[8px] text-slate-400">3 Random Cards</div>
+                                    </div>
+                                    <button 
+                                        onClick={() => handleBuyPack(500)}
+                                        class="pixel-btn bg-amber-500 border border-amber-300 text-slate-950 px-3 py-1 text-[9px] font-bold">
+                                        500 COINS
+                                    </button>
+                                </div>
+
+                                <div class="bg-slate-900 border-2 border-slate-800 p-3 flex justify-between items-center">
+                                    <div>
+                                        <div class="text-xs text-blue-400 font-bold">RARE GUARANTEED</div>
+                                        <div class="text-[8px] text-slate-400">1 Rare + 2 Randoms</div>
+                                    </div>
+                                    <button 
+                                        onClick={() => handleBuyPack(2500, 'rare')}
+                                        class="pixel-btn bg-blue-500 border border-blue-300 text-slate-950 px-3 py-1 text-[9px] font-bold">
+                                        2.5K COINS
+                                    </button>
+                                </div>
+
+                                <div class="bg-slate-900 border-2 border-slate-800 p-3 flex justify-between items-center">
+                                    <div>
+                                        <div class="text-xs text-purple-400 font-bold">EPIC BOOSTER</div>
+                                        <div class="text-[8px] text-slate-400">1 Epic + 2 Randoms</div>
+                                    </div>
+                                    <button 
+                                        onClick={() => handleBuyPack(10000, 'epic')}
+                                        class="pixel-btn bg-purple-500 border border-purple-300 text-slate-950 px-3 py-1 text-[9px] font-bold">
+                                        10K COINS
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {tab === 'tasks' && (
+                            <div class="space-y-3">
+                                <div class="bg-slate-900 border-2 border-slate-800 p-3 space-y-2">
+                                    <div class="flex justify-between items-center">
+                                        <div class="text-xs text-amber-400 font-bold">DAILY REWARD</div>
+                                        <div class="text-[9px] text-slate-400">STREAK: {checkInStreak} DAYS</div>
+                                    </div>
+                                    <button 
+                                        onClick={handleDailyCheckIn}
+                                        disabled={checkedInToday}
+                                        class={`w-full py-2 text-xs font-bold pixel-btn border ${
+                                            checkedInToday ? 'bg-slate-800 text-slate-600 border-slate-700' : 'bg-amber-500 text-slate-950 border-amber-300'
+                                        }`}>
+                                        {checkedInToday ? 'CHECKED IN TODAY' : 'CLAIM DAILY REWARD'}
+                                    </button>
+                                </div>
+
+                                <div class="text-[10px] text-slate-400">DAILY TASKS</div>
+                                {tasks.map(t => (
+                                    <div key={t.id} class="bg-slate-900 border-2 border-slate-800 p-3 flex justify-between items-center">
+                                        <div>
+                                            <div class="text-[10px] text-slate-200">{t.title}</div>
+                                            <div class="text-[8px] text-slate-400">{t.progress}/{t.target} - Reward: {t.reward} Coins</div>
+                                        </div>
+                                        <button 
+                                            onClick={() => claimTaskReward(t)}
+                                            disabled={t.progress < t.target || t.claimed}
+                                            class={`px-2 py-1 text-[8px] font-bold pixel-btn border ${
+                                                t.claimed ? 'bg-slate-800 text-slate-600 border-slate-700' :
+                                                t.progress >= t.target ? 'bg-emerald-500 text-slate-950 border-emerald-300' : 'bg-slate-800 text-slate-500 border-slate-700'
+                                            }`}>
+                                            {t.claimed ? 'CLAIMED' : 'CLAIM'}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {tab === 'profile' && (
+                            <div class="space-y-3">
+                                <div class="text-[10px] text-slate-400 mb-2">PLAYER PROFILE</div>
+                                <div class="bg-slate-900 border-2 border-slate-800 p-3 space-y-2 text-xs">
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">LEVEL:</span>
+                                        <span class="text-purple-400 font-bold">{level}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">VICTORIES:</span>
+                                        <span class="text-emerald-400 font-bold">{wins}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">CARDS IN BAG:</span>
+                                        <span class="text-amber-400 font-bold">{inventory.length}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">PASSIVE RATE:</span>
+                                        <span class="text-emerald-400 font-bold">+{passivePerHour}/h</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                    </div>
+
+                    <div class="bg-slate-950 border-t-4 border-slate-800 grid grid-cols-5 gap-1 p-1 text-[8px]">
+                        <button 
+                            onClick={() => { setTab('game'); playSound('click'); }}
+                            class={`py-2 text-center pixel-btn border ${tab === 'game' ? 'bg-amber-500 text-slate-950 border-amber-300' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                            <i class="fa-solid fa-gamepad block mb-1"></i> TABLE
+                        </button>
+                        <button 
+                            onClick={() => { setTab('bag'); playSound('click'); }}
+                            class={`py-2 text-center pixel-btn border ${tab === 'bag' ? 'bg-amber-500 text-slate-950 border-amber-300' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                            <i class="fa-solid fa-briefcase block mb-1"></i> BAG
+                        </button>
+                        <button 
+                            onClick={() => { setTab('store'); playSound('click'); }}
+                            class={`py-2 text-center pixel-btn border ${tab === 'store' ? 'bg-amber-500 text-slate-950 border-amber-300' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                            <i class="fa-solid fa-store block mb-1"></i> SHOP
+                        </button>
+                        <button 
+                            onClick={() => { setTab('tasks'); playSound('click'); }}
+                            class={`py-2 text-center pixel-btn border ${tab === 'tasks' ? 'bg-amber-500 text-slate-950 border-amber-300' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                            <i class="fa-solid fa-list-check block mb-1"></i> TASKS
+                        </button>
+                        <button 
+                            onClick={() => { setTab('profile'); playSound('click'); }}
+                            class={`py-2 text-center pixel-btn border ${tab === 'profile' ? 'bg-amber-500 text-slate-950 border-amber-300' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                            <i class="fa-solid fa-user block mb-1"></i> PROFILE
+                        </button>
+                    </div>
+
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
